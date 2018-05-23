@@ -1,0 +1,15 @@
+ZONE DEFINITION -- File Z1E  (TRANUS v12.10.1 )
+Study:EXC Example C with land use
+------------------------------------------------------------------------- /
+1.0 FIRST LEVEL ZONES
+        Zone 'Name'          
+           1 'Downtown'      
+           2 'Harlem Distri' 
+           3 'Beverly Garde' 
+*------------------------------------------------------------------------- /
+2.0 SECOND LEVEL ZONES
+        Zone  SubZone 'Name'           SubZone 'Name'           SubZone 'Name'          ->/
+*------------------------------------------------------------------------- /
+3.0 EXTERNAL ZONEs
+        Zone 'Name'          
+*------------------------------------------------------------------------- /
