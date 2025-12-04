@@ -1,4 +1,0 @@
-cython>=0.23.4
-numpy>=1.10.4
-pandas>=0.18.1
-scipy>=0.17.0
