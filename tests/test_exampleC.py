@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 import numpy as np
+import torch
 
 
 class TestExampleC(unittest.TestCase):
@@ -31,43 +32,59 @@ class TestExampleC(unittest.TestCase):
         self.assertTrue(scenario_path.exists())
 
 
-class TestDerivatives(unittest.TestCase):
-    """Tests for derivative computations."""
+class TestTorchUtilsJacobian(unittest.TestCase):
+    """Tests for Jacobian computations in torch_utils."""
 
-    def test_compute_DX_n_logit(self) -> None:
-        """Test DX_n computation with logit model."""
-        from pytranus._math import compute_DX_n
+    def test_jacobian_production_logit(self) -> None:
+        """Test Jacobian computation with logit model."""
+        from pytranus.torch_utils import jacobian_production_logit
 
         n_zones = 5
-        DX = np.zeros((n_zones, n_zones))
-        D_n = np.random.random(n_zones) * 100
-        Pr_n = np.random.random((n_zones, n_zones))
-        Pr_n = Pr_n / Pr_n.sum(axis=1, keepdims=True)  # Normalize rows
-        U_n = np.random.random((n_zones, n_zones)) + 1.0
+        torch.manual_seed(42)
+        D_n = torch.rand(n_zones) * 100
+        Pr_n = torch.rand(n_zones, n_zones)
+        Pr_n = Pr_n / Pr_n.sum(dim=1, keepdim=True)  # Normalize rows
 
-        result = compute_DX_n(
-            DX, n_sectors=10, n_zones=n_zones,
-            beta=0.5, lamda=1.0, D_n=D_n, Pr_n=Pr_n, U_n=U_n, logit=True
-        )
+        result = jacobian_production_logit(D_n, Pr_n, beta=0.5, lamda=1.0)
 
         self.assertEqual(result.shape, (n_zones, n_zones))
         # Diagonal should be negative (own-price effect)
-        self.assertTrue(all(result[i, i] <= 0 for i in range(n_zones)))
+        for i in range(n_zones):
+            self.assertLessEqual(result[i, i].item(), 0)
 
-    def test_compute_DX_n_vectorized(self) -> None:
-        """Test vectorized DX_n computation."""
-        from pytranus._math import compute_DX_n_vectorized
+    def test_jacobian_vs_autograd(self) -> None:
+        """Test that analytical Jacobian matches autograd."""
+        from pytranus.torch_utils import compute_production, jacobian_production_logit
 
-        n_zones = 5
-        D_n = np.random.random(n_zones) * 100
-        Pr_n = np.random.random((n_zones, n_zones))
-        Pr_n = Pr_n / Pr_n.sum(axis=1, keepdims=True)
+        n_zones = 4
+        beta = 0.5
+        lamda = 1.0
 
-        result = compute_DX_n_vectorized(
-            n_zones=n_zones, beta=0.5, lamda=1.0, D_n=D_n, Pr_n=Pr_n, logit=True
+        torch.manual_seed(42)
+        D_n = torch.rand(n_zones) * 100
+        phi = torch.rand(n_zones, requires_grad=True)
+
+        # Compute probabilities from phi
+        log_weights = -beta * lamda * phi
+        Pr_n = torch.softmax(log_weights.unsqueeze(0).expand(n_zones, -1), dim=-1)
+
+        # Compute production
+        X = compute_production(D_n, Pr_n)
+
+        # Autograd Jacobian
+        jac_autograd = torch.zeros(n_zones, n_zones)
+        for j in range(n_zones):
+            if phi.grad is not None:
+                phi.grad.zero_()
+            X[j].backward(retain_graph=True)
+            jac_autograd[j, :] = phi.grad.clone()
+
+        # Analytical Jacobian
+        jac_analytical = jacobian_production_logit(D_n, Pr_n.detach(), beta, lamda)
+
+        np.testing.assert_array_almost_equal(
+            jac_autograd.detach().numpy(), jac_analytical.numpy(), decimal=5
         )
-
-        self.assertEqual(result.shape, (n_zones, n_zones))
 
 
 if __name__ == "__main__":

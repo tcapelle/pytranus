@@ -322,6 +322,66 @@ class LcalParams:
             f")"
         )
 
+    def to_tensors(self, device: str | None = None, dtype=None):
+        """
+        Convert all parameters to PyTorch tensors.
+
+        Parameters
+        ----------
+        device : str, optional
+            Device for tensors ('cpu', 'cuda', 'mps').
+        dtype : torch.dtype, optional
+            Data type for tensors. Default is torch.float64.
+
+        Returns
+        -------
+        dict
+            Dictionary mapping parameter names to tensors.
+        """
+        import torch
+
+        if dtype is None:
+            dtype = torch.float64
+
+        def to_tensor(arr, is_int=False):
+            if is_int:
+                return torch.tensor(arr, dtype=torch.long, device=device)
+            return torch.tensor(arr, dtype=dtype, device=device)
+
+        return {
+            # Indices
+            "housing_sectors": to_tensor(self.housing_sectors, is_int=True),
+            "substitution_sectors": to_tensor(self.substitution_sectors, is_int=True),
+            # Production/Demand
+            "exog_prod": to_tensor(self.exog_prod),
+            "indu_prod": to_tensor(self.indu_prod),
+            "exog_demand": to_tensor(self.exog_demand),
+            "price": to_tensor(self.price),
+            "value_added": to_tensor(self.value_added),
+            "attractor": to_tensor(self.attractor),
+            "rmin": to_tensor(self.rmin),
+            "rmax": to_tensor(self.rmax),
+            # Sector parameters
+            "alpha": to_tensor(self.alpha),
+            "beta": to_tensor(self.beta),
+            "lamda": to_tensor(self.lamda),
+            "theta_loc": to_tensor(self.theta_loc),
+            # Demand function
+            "demax": to_tensor(self.demax),
+            "demin": to_tensor(self.demin),
+            "delta": to_tensor(self.delta),
+            # Substitution
+            "sigma": to_tensor(self.sigma),
+            "theta_sub": to_tensor(self.theta_sub),
+            "omega": to_tensor(self.omega),
+            "Kn": to_tensor(self.Kn, is_int=True),
+            # Attractors
+            "bkn": to_tensor(self.bkn),
+            # Transport
+            "t_nij": to_tensor(self.t_nij),
+            "tm_nij": to_tensor(self.tm_nij),
+        }
+
 
 def load_params(config: TranusConfig, normalize: bool = True) -> LcalParams:
     """

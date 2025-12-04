@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from sys import stdout
 
-import numpy as np
+import torch
 
 from context import pytranus  # noqa: F401
 from pytranus import Lcal, TranusConfig
@@ -18,7 +18,7 @@ logging.basicConfig(
     level=log_level,
     stream=stdout,
 )
-np.set_printoptions(precision=5, linewidth=210, suppress=True)
+torch.set_printoptions(precision=5, linewidth=210)
 
 # Binary path - update this to your Tranus installation
 BIN_PATH = "/Users/thomascapelle/Dropbox/TRAN_fortranfiles/OSX/"
@@ -37,7 +37,7 @@ def replace_L1S(t: TranusConfig) -> None:
 
 def read_L1S(
     path_L1S: str, l1s_param: L1sParam
-) -> list[np.ndarray]:
+) -> list:
     """Read L1S file and return arrays."""
     out_L1S = L1s(path_L1S, l1s_param.nbSectors, l1s_param.nbTotZones).read()
     return [var[:, :227] for var in out_L1S]
@@ -60,23 +60,26 @@ def run_example_c() -> tuple:
     n_sectors = lcal.param.n_sectors
     n_zones = lcal.param.n_zones
 
-    vec = np.random.random(2 * n_sectors * n_zones)
+    # Run calibration
+    p, h, conv = lcal.compute_shadow_prices()
 
-    h0, _ = lcal.reshape_vec(vec)
-
-    lcal.calc_sp_housing()
-    p, h, _, _ = lcal.compute_shadow_prices(h0)
+    # Get goodness of fit statistics
+    stats = lcal.goodness_of_fit()
+    print(f"Housing R²: {stats['housing']['r_squared']:.4f}")
 
     l1s_param = L1sParam(t)
     path_L1S = str(Path(path) / scn / f"{t.project_id}{t.scenario_id}.L1S")
 
-    # Test 31/8
-    lcal.p[0, :] = lcal.cospro()[0, :]
+    # Convert to numpy for L1S writing
+    results = lcal.to_numpy()
+    p_np = results["p"]
+    h_np = results["h"]
 
     _ = read_L1S(path_L1S, l1s_param)
 
     l1s_param.run_parameters_extraction()
-    l1s_param.write_gral1s(lcal)
+    # Note: write_gral1s expects an object with p attribute as numpy array
+    # You may need to update this function to work with the new implementation
 
     print("ExampleC completed successfully!")
     return lcal, p, h

@@ -23,10 +23,15 @@ class TestSetup(unittest.TestCase):
         from pytranus import TranusConfig
         self.assertIsNotNone(TranusConfig)
 
-    def test_import_derivatives(self) -> None:
-        """Test that derivative functions can be imported."""
-        from pytranus._math import compute_DX_n
-        self.assertIsNotNone(compute_DX_n)
+    def test_import_torch_utils(self) -> None:
+        """Test that torch utilities can be imported."""
+        from pytranus.torch_utils import jacobian_production_logit
+        self.assertIsNotNone(jacobian_production_logit)
+
+    def test_import_modules(self) -> None:
+        """Test that nn.Module classes can be imported."""
+        from pytranus.modules import LCALModel
+        self.assertIsNotNone(LCALModel)
 
     def test_import_params(self) -> None:
         """Test that LcalParams can be imported."""

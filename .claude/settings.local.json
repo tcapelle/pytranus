@@ -5,7 +5,8 @@
       "Bash(python3 -m py_compile:*)",
       "Bash(python -m pytest:*)",
       "Bash(python:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []
