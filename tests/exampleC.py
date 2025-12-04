@@ -9,10 +9,9 @@ from sys import stdout
 import torch
 
 from context import pytranus  # noqa: F401
-from pytranus import Lcal, TranusConfig
-from pytranus.io import L1s, L1sParam
+from pytranus import LCALModel, TranusConfig
 
-log_level = logging.DEBUG
+log_level = logging.INFO
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
     level=log_level,
@@ -20,69 +19,58 @@ logging.basicConfig(
 )
 torch.set_printoptions(precision=5, linewidth=210)
 
-# Binary path - update this to your Tranus installation
-BIN_PATH = "/Users/thomascapelle/Dropbox/TRAN_fortranfiles/OSX/"
-
-
-def replace_L1S(t: TranusConfig) -> None:
-    """Replace L1S file with newly generated one."""
-    path_scn = Path(t.working_directory) / t.scenario_id
-    old_file = path_scn / f"{t.project_id}{t.scenario_id}.L1S"
-    new_file = path_scn / f"NEW_LCAL_{t.scenario_id}.L1S"
-    if old_file.exists():
-        old_file.unlink()
-    if new_file.exists():
-        new_file.rename(old_file)
-
-
-def read_L1S(
-    path_L1S: str, l1s_param: L1sParam
-) -> list:
-    """Read L1S file and return arrays."""
-    out_L1S = L1s(path_L1S, l1s_param.nbSectors, l1s_param.nbTotZones).read()
-    return [var[:, :227] for var in out_L1S]
-
 
 def run_example_c() -> tuple:
-    """Run ExampleC calibration."""
+    """Run ExampleC calibration with PyTorch."""
     scn = "03A"
     path = str(Path(__file__).parent / "ExampleC")
 
-    t = TranusConfig(
-        tranus_bin_path=BIN_PATH,
+    config = TranusConfig(
+        tranus_bin_path="/dummy/path",  # Not needed for calibration
         working_directory=path,
         project_id="EXC",
         scenario_id=scn,
     )
 
-    lcal = Lcal(t, normalize=False)
+    print(f"Loading model from {path}...")
+    model = LCALModel.from_config(config, normalize=True)
 
-    n_sectors = lcal.param.n_sectors
-    n_zones = lcal.param.n_zones
+    print(f"Model: {model.n_sectors} sectors, {model.n_zones} zones")
+    print(f"Housing sectors: {model.housing_sectors.tolist()}")
 
-    # Run calibration
-    p, h, conv = lcal.compute_shadow_prices()
+    # Standard PyTorch training
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.05)
 
-    # Get goodness of fit statistics
-    stats = lcal.goodness_of_fit()
-    print(f"Housing R²: {stats['housing']['r_squared']:.4f}")
+    print("\nTraining...")
+    for step in range(5000):
+        optimizer.zero_grad()
+        loss = model()
+        loss.backward()
+        optimizer.step()
 
-    l1s_param = L1sParam(t)
-    path_L1S = str(Path(path) / scn / f"{t.project_id}{t.scenario_id}.L1S")
+        if step % 100 == 0:
+            print(f"  Step {step}: loss = {loss.item():.6f}")
 
-    # Convert to numpy for L1S writing
-    results = lcal.to_numpy()
-    p_np = results["p"]
-    h_np = results["h"]
+        if loss.item() < 1e-6:
+            print(f"  Converged at step {step}")
+            break
 
-    _ = read_L1S(path_L1S, l1s_param)
+    # Get results
+    stats = model.goodness_of_fit()
+    print(f"\nResults:")
+    print(f"  Housing R²: {stats['housing']['r_squared']:.4f}")
+    print(f"  Housing MSE: {stats['housing']['mse']:.6f}")
 
-    l1s_param.run_parameters_extraction()
-    # Note: write_gral1s expects an object with p attribute as numpy array
-    # You may need to update this function to work with the new implementation
+    # Print per-sector stats
+    for key, val in stats.items():
+        if key.startswith("sector_"):
+            print(f"  {key} R²: {val['r_squared']:.4f}")
 
+    h = model.h.detach()
+    print(f"\nShadow prices shape: {h.shape}")
     print("ExampleC completed successfully!")
-    return lcal, p, h
+
+    return model, h, stats
 
 
 if __name__ == "__main__":

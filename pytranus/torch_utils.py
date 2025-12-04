@@ -17,6 +17,18 @@ if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
 
+# Minimum value for numerical stability (avoid log(0))
+EPS = 1e-10
+
+__all__ = [
+    "EPS",
+    "to_tensor",
+    "logit_softmax",
+    "elastic_demand",
+    "compute_production",
+    "safe_log",
+]
+
 
 def to_tensor(
     arr: NDArray | Tensor,
@@ -51,7 +63,7 @@ def to_tensor(
     return tensor
 
 
-def softmax_logit(
+def logit_softmax(
     utilities: Tensor,
     attractors: Tensor,
     beta: float | Tensor,
@@ -62,12 +74,16 @@ def softmax_logit(
 
     P_j = A_j * exp(-beta * U_j) / sum_k(A_k * exp(-beta * U_k))
 
+    Uses log-space computation for numerical stability:
+    logits = log(A) - beta * U
+    P = softmax(logits)
+
     Parameters
     ----------
     utilities : Tensor
         Utility values.
     attractors : Tensor
-        Attractor values.
+        Attractor values (must be positive).
     beta : float or Tensor
         Dispersion parameter.
     dim : int, default -1
@@ -78,9 +94,9 @@ def softmax_logit(
     Tensor
         Probability distribution.
     """
-    # Use log-sum-exp trick for numerical stability
-    log_weights = torch.log(attractors + 1e-10) - beta * utilities
-    return F.softmax(log_weights, dim=dim)
+    # Clamp attractors to avoid log(0)
+    logits = torch.log(attractors.clamp(min=EPS)) - beta * utilities
+    return F.softmax(logits, dim=dim)
 
 
 def elastic_demand(
@@ -143,56 +159,6 @@ def compute_production(
         return torch.einsum("ni,nij->nj", demands, probabilities)
 
 
-def jacobian_production_logit(
-    demands: Tensor,
-    probabilities: Tensor,
-    beta: float | Tensor,
-    lamda: float | Tensor,
-) -> Tensor:
-    """
-    Compute Jacobian of production w.r.t. combined price (phi = p + h).
-
-    For logit model:
-    dX_j/dphi_k = sum_i D_i * lambda * beta * (Pr_{ij} * Pr_{ik} - delta_{jk} * Pr_{ij})
-
-    Parameters
-    ----------
-    demands : Tensor of shape (n_zones,)
-        Demand by zone.
-    probabilities : Tensor of shape (n_zones, n_zones)
-        Location probabilities.
-    beta : float or Tensor
-        Dispersion parameter.
-    lamda : float or Tensor
-        Marginal utility parameter.
-
-    Returns
-    -------
-    Tensor of shape (n_zones, n_zones)
-        Jacobian matrix dX[j]/dphi[k].
-    """
-    coef = lamda * beta
-
-    # Weighted probabilities: (n_zones, n_zones)
-    weighted_Pr = probabilities * demands[:, None]
-
-    # Off-diagonal: coef * sum_i(D_i * Pr_ij * Pr_ik) = coef * Pr.T @ weighted_Pr
-    jacobian = coef * (weighted_Pr.T @ probabilities)
-
-    # Diagonal: -coef * sum_i(D_i * Pr_ij * (1 - Pr_ij))
-    diag_term = coef * torch.sum(
-        demands[:, None] * probabilities * (1 - probabilities), dim=0
-    )
-    jacobian.diagonal().copy_(-diag_term)
-
-    return jacobian
-
-
-def safe_log(x: Tensor, eps: float = 1e-10) -> Tensor:
-    """Compute log with numerical stability."""
-    return torch.log(x + eps)
-
-
-def safe_div(numerator: Tensor, denominator: Tensor, eps: float = 1e-10) -> Tensor:
-    """Compute division with numerical stability."""
-    return numerator / (denominator + eps)
+def safe_log(x: Tensor) -> Tensor:
+    """Compute log with numerical stability using clamp."""
+    return torch.log(x.clamp(min=EPS))

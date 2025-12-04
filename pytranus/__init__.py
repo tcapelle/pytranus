@@ -38,12 +38,13 @@ from pytranus.__version__ import __version__
 from pytranus.config import BinaryInterface, TranusConfig
 from pytranus.io import L1sData, L1sWriter, read_l1s
 from pytranus.lcal_torch import Lcal, LcalTorch, calibrate, train
-from pytranus.modules import LCALModel
+from pytranus.modules import GeneralLCALModel, LCALModel
 from pytranus.params import LcalParams, load_params
 
 __all__ = [
     # Core classes
     "LCALModel",
+    "GeneralLCALModel",
     "Lcal",
     "LcalTorch",
     "calibrate",

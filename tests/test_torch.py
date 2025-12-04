@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 import context  # noqa: F401
-from pytranus import LCALModel, Lcal, TranusConfig
+from pytranus import GeneralLCALModel, LCALModel, Lcal, TranusConfig
 
 # Path to ExampleC test data
 EXAMPLE_PATH = Path(__file__).parent / "ExampleC"
@@ -31,17 +31,18 @@ class TestTorchUtils(unittest.TestCase):
         self.assertEqual(tensor.shape, (2, 2))
         np.testing.assert_array_almost_equal(arr, tensor.numpy())
 
-    def test_softmax_logit(self) -> None:
-        """Test softmax with attractors."""
-        from pytranus.torch_utils import softmax_logit
+    def test_logit_softmax(self) -> None:
+        """Test softmax with attractors (logit model)."""
+        from pytranus.torch_utils import logit_softmax
 
         utilities = torch.tensor([1.0, 2.0, 3.0])
         attractors = torch.tensor([1.0, 1.0, 1.0])
         beta = 1.0
 
-        probs = softmax_logit(utilities, attractors, beta)
+        probs = logit_softmax(utilities, attractors, beta)
 
         self.assertAlmostEqual(probs.sum().item(), 1.0, places=6)
+        # Higher utility = lower probability (negative in logit)
         self.assertGreater(probs[0].item(), probs[1].item())
         self.assertGreater(probs[1].item(), probs[2].item())
 
@@ -73,20 +74,17 @@ class TestTorchUtils(unittest.TestCase):
             production.numpy(), demands.numpy()
         )
 
-    def test_jacobian_production_logit(self) -> None:
-        """Test Jacobian computation."""
-        from pytranus.torch_utils import jacobian_production_logit
+    def test_safe_log(self) -> None:
+        """Test safe_log handles zeros correctly."""
+        from pytranus.torch_utils import safe_log
 
-        n_zones = 4
-        demands = torch.rand(n_zones) * 100
-        probs = torch.rand(n_zones, n_zones)
-        probs = probs / probs.sum(dim=1, keepdim=True)
+        x = torch.tensor([0.0, 1.0, 2.0])
+        result = safe_log(x)
 
-        jac = jacobian_production_logit(demands, probs, beta=0.5, lamda=1.0)
-
-        self.assertEqual(jac.shape, (n_zones, n_zones))
-        for i in range(n_zones):
-            self.assertLessEqual(jac[i, i].item(), 0.0)
+        # Should not produce -inf for zero input
+        self.assertTrue(torch.isfinite(result).all())
+        # log(1) should still be 0
+        self.assertAlmostEqual(result[1].item(), 0.0, places=6)
 
 
 class TestModules(unittest.TestCase):
@@ -341,6 +339,70 @@ class TestLCALModelAPI(unittest.TestCase):
 
         # Loss should decrease
         self.assertLess(final_loss, initial_loss)
+
+
+class TestGeneralLCALModel(unittest.TestCase):
+    """Test the general LCAL model (Equations 3.3-3.4)."""
+
+    @unittest.skipUnless(HAS_EXAMPLE_DATA, "ExampleC data not available")
+    def test_general_model_training(self) -> None:
+        """Test that GeneralLCALModel can be trained."""
+        config = TranusConfig(
+            tranus_bin_path="/dummy/path",
+            working_directory=str(EXAMPLE_PATH),
+            project_id="EXC",
+            scenario_id="03A",
+        )
+
+        model = GeneralLCALModel.from_config(config)
+
+        # h should be a parameter for ALL sectors
+        self.assertIsInstance(model.h, torch.nn.Parameter)
+        self.assertEqual(model.h.shape, (model.n_sectors, model.n_zones))
+
+        # Standard training loop
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.1)
+
+        initial_loss = model().item()
+
+        for _ in range(10):
+            optimizer.zero_grad()
+            loss = model()
+            loss.backward()
+            optimizer.step()
+
+        final_loss = model().item()
+
+        # Loss should decrease
+        self.assertLess(final_loss, initial_loss)
+
+    @unittest.skipUnless(HAS_EXAMPLE_DATA, "ExampleC data not available")
+    def test_general_vs_special_case(self) -> None:
+        """Compare GeneralLCALModel vs LCALModel (special case)."""
+        config = TranusConfig(
+            tranus_bin_path="/dummy/path",
+            working_directory=str(EXAMPLE_PATH),
+            project_id="EXC",
+            scenario_id="03A",
+        )
+
+        general = GeneralLCALModel.from_config(config)
+        special = LCALModel.from_config(config)
+
+        # Both should have same structure
+        self.assertEqual(general.n_sectors, special.n_sectors)
+        self.assertEqual(general.n_zones, special.n_zones)
+
+        # At h=0, production should be similar but not identical
+        # (because general model uses full location choice for housing too)
+        with torch.no_grad():
+            X_general = general.production()
+            X_special = special.production()
+
+        # Both should be valid production arrays
+        self.assertEqual(X_general.shape, X_special.shape)
+        self.assertTrue((X_general >= 0).all())
+        self.assertTrue((X_special >= 0).all())
 
 
 class TestDeviceSupport(unittest.TestCase):
